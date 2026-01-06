@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SongAnalysis, ChordEvent, AudioMetadata, AnalysisLevel } from '../types';
 
 interface AnalysisResultProps {
@@ -26,24 +26,21 @@ const getDisplayChord = (chord: ChordEvent, level: AnalysisLevel): string => {
   if (quality === 'minor' || quality === 'min') quality = 'm';
   if (quality === 'major' || quality === 'maj') quality = ''; 
   if (quality === 'dominant' || quality === 'dom') quality = ''; 
-  if (quality === 'diminished' || quality === 'dim') quality = 'dim';
-  if (quality === 'augmented' || quality === 'aug') quality = 'aug';
-
-  // --- BASIC MODE LOGIC ---
-  // STRICT Simplification: Root + Triad Quality ONLY. No extensions, no bass slash.
+  
+  // --- BASIC MODE: STRICT TRIADS ONLY ---
+  // No extensions, no bass, no complex qualities
   if (level === 'Basic') {
-    // If it's a slash chord like C/G, just show C
-    // If it's Cm7, just show Cm
-    return `${root}${quality}`; 
+     // Handle Diminished/Augmented as simple text if needed, usually just show root+min or root
+     if (quality === 'dim' || quality === 'aug') return `${root}${quality}`;
+     // For everything else, strictly Root + (m if minor)
+     return `${root}${quality === 'm' ? 'm' : ''}`; 
   }
   
-  // --- INTERMEDIATE/ADVANCED LOGIC ---
-  // Return Full Symbol if available and reasonable length
+  // --- ADVANCED ---
   if (symbol && symbol.length < 15 && !symbol.toLowerCase().includes('none')) {
       return symbol;
   }
 
-  // Fallback construction
   return `${root}${quality}${extension}${bass && bass !== root ? `/${bass}` : ''}`;
 };
 
@@ -63,32 +60,27 @@ const ChordPlayer: React.FC<{
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [complexity, setComplexity] = useState<AnalysisLevel>('Advanced');
 
-  const FIXED_PPS = 120; // Pixels per second for timeline
+  const FIXED_PPS = 120; 
 
-  // --- AUDIO LOOP ---
   useEffect(() => {
     let animationFrameId: number;
     const update = () => {
       if (audioRef.current) {
-        const t = audioRef.current.currentTime;
-        setCurrentTime(t);
+        setCurrentTime(audioRef.current.currentTime);
       }
       if (isPlaying) {
         animationFrameId = requestAnimationFrame(update);
       }
     };
-
     if (isPlaying) {
       animationFrameId = requestAnimationFrame(update);
     }
-
     return () => cancelAnimationFrame(animationFrameId);
   }, [isPlaying]);
 
-  // --- AUTO SCROLL GRID (INTERNAL SCROLL ONLY) ---
+  // --- INTERNAL SCROLL LOGIC ---
   useEffect(() => {
     if (isPlaying && gridContainerRef.current) {
-      // Find the index of the active chord
       const activeIndex = analysis.chords?.findIndex(
         c => currentTime >= c.seconds && currentTime < (c.seconds + c.duration)
       );
@@ -98,12 +90,11 @@ const ChordPlayer: React.FC<{
         const container = gridContainerRef.current;
 
         if (activeCard && container) {
-           // Calculate position relative to container, not the window
+           // Scroll ONLY the grid container, vertically centered
            const cardTop = activeCard.offsetTop;
            const cardHeight = activeCard.clientHeight;
            const containerHeight = container.clientHeight;
            
-           // Smooth scroll the CONTAINER only
            container.scrollTo({
              top: cardTop - (containerHeight / 2) + (cardHeight / 2),
              behavior: 'smooth'
@@ -113,7 +104,6 @@ const ChordPlayer: React.FC<{
     }
   }, [currentTime, isPlaying, analysis.chords]);
 
-  // --- CONTROLS ---
   const togglePlay = () => {
     if (audioRef.current) {
       if (isPlaying) audioRef.current.pause();
@@ -135,7 +125,7 @@ const ChordPlayer: React.FC<{
   return (
     <div className="w-full max-w-7xl mx-auto space-y-8">
       
-      {/* 1. TIMELINE & PLAYER (Sticky functionality if needed, but relative here) */}
+      {/* 1. TIMELINE & PLAYER */}
       <div className="bg-slate-900 rounded-3xl border border-slate-700 overflow-hidden shadow-2xl relative z-20">
         <audio 
             ref={audioRef} 
@@ -144,21 +134,14 @@ const ChordPlayer: React.FC<{
             onTimeUpdate={(e) => { if(!isPlaying) setCurrentTime(e.currentTarget.currentTime); }}
         />
 
-        {/* Timeline Visualizer */}
-        <div className="relative bg-slate-950 h-48 sm:h-64 overflow-hidden border-b border-slate-800 select-none cursor-pointer group"
-             onClick={(e) => {
-                 // Optional: Click to seek logic could go here
-             }}
-        >
-             {/* Center Line */}
+        {/* Visualizer */}
+        <div className="relative bg-slate-950 h-48 sm:h-64 overflow-hidden border-b border-slate-800 select-none">
              <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-indigo-500 z-30 shadow-[0_0_15px_indigo]"></div>
              
-             {/* Moving Track */}
              <div 
                className="absolute top-0 bottom-0 left-1/2 will-change-transform"
                style={{ transform: `translate3d(${-currentTime * FIXED_PPS}px, 0, 0)` }}
              >
-                {/* Sections (Top Strip) */}
                 <div className="absolute top-0 h-6 flex">
                     {analysis.sections?.map((section, i) => (
                         <div key={i} 
@@ -175,7 +158,6 @@ const ChordPlayer: React.FC<{
                     ))}
                 </div>
 
-                {/* Chord Blocks */}
                 <div className="absolute top-8 bottom-0 flex">
                     {analysis.chords?.map((chord, i) => (
                         <div key={i}
@@ -193,14 +175,12 @@ const ChordPlayer: React.FC<{
                 </div>
              </div>
              
-             {/* Gradients */}
              <div className="absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-slate-900 via-slate-900/80 to-transparent z-20 pointer-events-none"></div>
              <div className="absolute inset-y-0 right-0 w-1/4 bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent z-20 pointer-events-none"></div>
         </div>
 
         {/* Controls */}
         <div className="p-4 bg-slate-900 flex flex-col gap-4">
-             {/* Seeker */}
              <div className="flex items-center gap-4">
                 <span className="text-xs font-mono text-slate-400 w-10 text-right">{Math.floor(currentTime/60)}:{Math.floor(currentTime%60).toString().padStart(2,'0')}</span>
                 <input 
@@ -241,7 +221,7 @@ const ChordPlayer: React.FC<{
         </div>
       </div>
 
-      {/* 2. CHORD GRID (Scrollable independently) */}
+      {/* 2. CHORD GRID (Independent Scroll) */}
       <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800/50 relative z-10">
           <div className="flex justify-between items-end mb-6">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
@@ -260,7 +240,7 @@ const ChordPlayer: React.FC<{
 
           <div 
              ref={gridContainerRef}
-             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-indigo-900 scrollbar-track-slate-900 scroll-smooth"
+             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-indigo-900 scrollbar-track-slate-900 scroll-smooth relative"
           >
              {analysis.chords?.map((chord, i) => {
                  const isActive = activeChord === chord;
@@ -305,7 +285,6 @@ const ChordPlayer: React.FC<{
                              </div>
                         )}
                         
-                        {/* Progress Bar inside card */}
                         {isActive && (
                              <div className="absolute bottom-0 left-0 h-1 bg-indigo-500 transition-all duration-75 rounded-b-xl"
                                   style={{ width: `${Math.min(100, ((currentTime - chord.seconds) / chord.duration) * 100)}%` }}

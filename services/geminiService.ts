@@ -13,33 +13,39 @@ const MODEL_ID = "gemini-2.0-flash-exp";
 const extractJSON = (text: string): any => {
   if (!text) return null;
   
+  // 1. Basic Cleanup (Remove Markdown)
+  let cleanText = text.trim();
+  cleanText = cleanText.replace(/```json/g, '').replace(/```/g, '');
+
+  // 2. Isolate JSON Object (Find outer braces)
+  const firstBrace = cleanText.indexOf('{');
+  const lastBrace = cleanText.lastIndexOf('}');
+
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    cleanText = cleanText.substring(firstBrace, lastBrace + 1);
+  }
+
+  // 3. ATTEMPT 1: Direct Parse (Most Reliable)
   try {
-    let cleanText = text.trim();
-
-    // 1. Remove Markdown code blocks (```json ... ```)
-    cleanText = cleanText.replace(/```json/g, '').replace(/```/g, '');
-
-    // 2. Find the outer-most JSON object brackets
-    const firstBrace = cleanText.indexOf('{');
-    const lastBrace = cleanText.lastIndexOf('}');
-
-    if (firstBrace !== -1 && lastBrace !== -1) {
-      // Extract ONLY the JSON part
-      cleanText = cleanText.substring(firstBrace, lastBrace + 1);
-    } else {
-      throw new Error("No JSON object found in response");
-    }
-
-    // 3. Simple cleanup engine for common LLM JSON errors
-    // Fix: Ensure keys are quoted
-    cleanText = cleanText.replace(/([{,]\s*)([a-zA-Z0-9_]+?)\s*:/g, '$1"$2":');
-    // Fix: Remove trailing commas
-    cleanText = cleanText.replace(/,(\s*[}\]])/g, '$1');
-
     return JSON.parse(cleanText);
   } catch (e) {
-    console.error("JSON Parse Failed:", e);
-    console.log("Raw Text:", text);
+    console.warn("Direct parse failed. Attempting repair...");
+  }
+
+  // 4. ATTEMPT 2: Aggressive Repair (Fallback only)
+  try {
+    // Fix unquoted keys (e.g. { key: "value" } -> { "key": "value" })
+    // We use a specific regex that tries to avoid matching text inside values
+    // This looks for a key at the start of a line or after a comma/brace
+    let repaired = cleanText.replace(/([{,]\s*)([a-zA-Z0-9_]+?)\s*:/g, '$1"$2":');
+    
+    // Fix trailing commas before closing braces
+    repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+    
+    return JSON.parse(repaired);
+  } catch (e) {
+    console.error("JSON Repair Failed:", e);
+    console.log("Failed Text:", text);
     throw new Error("Analysis produced invalid data format.");
   }
 };
@@ -71,32 +77,31 @@ async function generateWithRetry(contents: any, config: any, retries = 0): Promi
 export const analyzeAudioContent = async (base64Data: string, mimeType: string, duration: number): Promise<SongAnalysis> => {
   const formattedDuration = `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}`;
   
-  // Prompt optimized for Reliability + Musical Accuracy
+  // Precise prompt asking for JSON only
   const prompt = `
     Role: Senior Music Theorist.
-    Task: Analyze audio (${formattedDuration}) and return JSON.
+    Task: Analyze audio (${formattedDuration}) and return strictly formatted JSON.
     
-    CRITICAL ANALYSIS RULES:
-    1. **BPM & Time**: Detect precise BPM first. Ensure measures align.
-    2. **Sync**: The chord progression MUST cover the entire file (0.00s to ${duration}s). Do not stop early.
-    3. **Accuracy**: Use "N.C." for silence. Verify modulation key changes.
+    INSTRUCTIONS:
+    1. **BPM & Grid**: Determine precise BPM. Ensure chord timestamps align perfectly with the grid.
+    2. **Completeness**: The chords array MUST cover the audio from 0.0s to exactly ${duration}s. Use "N.C." for silence.
+    3. **Accuracy**: Detect key changes (modulations) and complex extensions.
     
-    STRICT OUTPUT FORMAT:
-    - Output **ONLY** raw JSON. No markdown, no "Thinking:" text.
-    - Keys must be double-quoted.
-    - 'seconds' must be float.
+    OUTPUT FORMAT:
+    - Return **ONLY** the JSON object. Do not include "Thinking" steps or markdown text outside the JSON.
+    - Ensure all keys and string values are double-quoted.
 
     JSON STRUCTURE:
     {
-      "title": "string",
-      "artist": "string",
-      "key": "string",
+      "title": "Song Title",
+      "artist": "Artist Name",
+      "key": "C Minor",
       "bpm": 120,
       "timeSignature": "4/4",
       "complexityLevel": "Intermediate",
-      "summary": "string",
+      "summary": "Brief harmonic description.",
       "sections": [
-        { "name": "Intro", "startTime": 0.0, "endTime": 10.0, "color": "#hex" }
+        { "name": "Intro", "startTime": 0.0, "endTime": 10.0, "color": "#475569" }
       ],
       "chords": [
         {
@@ -124,7 +129,7 @@ export const analyzeAudioContent = async (base64Data: string, mimeType: string, 
 
     const response = await generateWithRetry(contents, {
       responseMimeType: "application/json", 
-      temperature: 0.2, // Slightly higher to allow musical creativity but low enough for structure
+      temperature: 0.1, // Low temperature for consistent JSON structure
       maxOutputTokens: 8192,
     });
 

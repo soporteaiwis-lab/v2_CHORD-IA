@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { SongAnalysis, ChordEvent, AudioMetadata, AnalysisLevel } from '../types';
 
@@ -28,15 +27,15 @@ const getDisplayChord = (chord: ChordEvent, level: AnalysisLevel): string => {
   if (quality === 'dominant' || quality === 'dom') quality = ''; 
   
   // --- BASIC MODE: STRICT TRIADS ONLY ---
-  // No extensions, no bass, no complex qualities
   if (level === 'Basic') {
-     // Handle Diminished/Augmented as simple text if needed, usually just show root+min or root
+     // If it's diminished or augmented, keep that info as it's critical for function
      if (quality === 'dim' || quality === 'aug') return `${root}${quality}`;
-     // For everything else, strictly Root + (m if minor)
+     // Otherwise, strictly Root + m (if minor)
+     // No 7ths, no slash bass
      return `${root}${quality === 'm' ? 'm' : ''}`; 
   }
   
-  // --- ADVANCED ---
+  // --- ADVANCED/INTERMEDIATE ---
   if (symbol && symbol.length < 15 && !symbol.toLowerCase().includes('none')) {
       return symbol;
   }
@@ -91,6 +90,7 @@ const ChordPlayer: React.FC<{
 
         if (activeCard && container) {
            // Scroll ONLY the grid container, vertically centered
+           // We calculate the position needed to center the card within the visible container area
            const cardTop = activeCard.offsetTop;
            const cardHeight = activeCard.clientHeight;
            const containerHeight = container.clientHeight;
@@ -305,47 +305,43 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, metada
 
   return (
     <div className="w-full animate-fade-in pb-20">
-      
-      {/* Top Metadata Cards */}
-      <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-         <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-center">
-             <div className="text-[10px] font-bold uppercase text-slate-500 tracking-widest mb-1">Key Center</div>
-             <div className="text-2xl font-black text-white">{analysis.key}</div>
-         </div>
-         <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-center">
-             <div className="text-[10px] font-bold uppercase text-slate-500 tracking-widest mb-1">Time Signature</div>
-             <div className="text-2xl font-black text-white">{analysis.timeSignature}</div>
-         </div>
-         <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-center">
-             <div className="text-[10px] font-bold uppercase text-slate-500 tracking-widest mb-1">Complexity</div>
-             <div className={`text-xl font-bold ${analysis.complexityLevel === 'Advanced' ? 'text-emerald-400' : 'text-white'}`}>
-                {analysis.complexityLevel}
-             </div>
-         </div>
-         <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-center">
-             <div className="text-[10px] font-bold uppercase text-slate-500 tracking-widest mb-1">BPM Estimate</div>
-             <div className="text-2xl font-black text-white">{analysis.bpm}</div>
-         </div>
-      </div>
+       <div className="text-center mb-12">
+          <h1 className="text-4xl font-black text-white mb-2 tracking-tight">{analysis.title || "Untitled Track"}</h1>
+          <p className="text-xl text-indigo-400 font-bold mb-6">{analysis.artist || "Unknown Artist"}</p>
+          
+          <div className="inline-flex flex-wrap justify-center gap-3 sm:gap-6">
+              <div className="bg-slate-900/80 backdrop-blur border border-slate-700/50 px-5 py-3 rounded-2xl text-center min-w-[100px] shadow-lg">
+                 <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-1">Key Center</div>
+                 <div className="text-white font-black text-lg">{analysis.key}</div>
+              </div>
+              <div className="bg-slate-900/80 backdrop-blur border border-slate-700/50 px-5 py-3 rounded-2xl text-center min-w-[100px] shadow-lg">
+                 <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-1">Tempo</div>
+                 <div className="text-white font-black text-lg">{analysis.bpm} <span className="text-xs text-slate-500 font-normal">BPM</span></div>
+              </div>
+               <div className="bg-slate-900/80 backdrop-blur border border-slate-700/50 px-5 py-3 rounded-2xl text-center min-w-[100px] shadow-lg">
+                 <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-1">Time Sig</div>
+                 <div className="text-white font-black text-lg">{analysis.timeSignature}</div>
+              </div>
+              <div className="bg-slate-900/80 backdrop-blur border border-slate-700/50 px-5 py-3 rounded-2xl text-center min-w-[100px] shadow-lg">
+                 <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-1">Complexity</div>
+                 <div className="text-white font-black text-lg">{analysis.complexityLevel}</div>
+              </div>
+          </div>
+          
+          {analysis.summary && (
+            <div className="mt-8 max-w-3xl mx-auto">
+                <p className="text-slate-400 text-sm leading-relaxed italic opacity-80">
+                   "{analysis.summary}"
+                </p>
+            </div>
+          )}
+       </div>
 
-      {/* Harmonic Summary */}
-      <div className="max-w-7xl mx-auto mb-8 bg-gradient-to-r from-indigo-900/20 to-slate-900 border border-indigo-500/20 p-6 rounded-2xl">
-          <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-             <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-             Harmonic Summary
-          </h3>
-          <p className="text-slate-400 text-sm leading-relaxed">
-             {analysis.summary}
-          </p>
-      </div>
-
-      {/* Player and Grid */}
-      <ChordPlayer 
-        audioUrl={metadata?.audioUrl} 
-        duration={metadata?.duration || 0} 
-        analysis={analysis} 
-      />
-
+       <ChordPlayer 
+          analysis={analysis} 
+          audioUrl={metadata?.audioUrl} 
+          duration={metadata?.duration || 0} 
+       />
     </div>
   );
 };

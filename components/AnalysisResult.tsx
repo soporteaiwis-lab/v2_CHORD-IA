@@ -20,22 +20,30 @@ const getDisplayChord = (chord: ChordEvent, level: AnalysisLevel): string => {
   let quality = cleanStr(chord.quality).toLowerCase();
   let extension = cleanStr(chord.extension);
   let bass = cleanStr(chord.bass);
+  const symbol = cleanStr(chord.symbol);
   
   // Normalize quality
   if (quality === 'minor' || quality === 'min') quality = 'm';
   if (quality === 'major' || quality === 'maj') quality = ''; 
   if (quality === 'dominant' || quality === 'dom') quality = ''; 
+  if (quality === 'diminished' || quality === 'dim') quality = 'dim';
+  if (quality === 'augmented' || quality === 'aug') quality = 'aug';
 
+  // --- BASIC MODE LOGIC ---
+  // STRICT Simplification: Root + Triad Quality ONLY. No extensions, no bass slash.
   if (level === 'Basic') {
+    // If it's a slash chord like C/G, just show C
+    // If it's Cm7, just show Cm
     return `${root}${quality}`; 
   }
   
+  // --- INTERMEDIATE/ADVANCED LOGIC ---
   // Return Full Symbol if available and reasonable length
-  const symbol = cleanStr(chord.symbol);
   if (symbol && symbol.length < 15 && !symbol.toLowerCase().includes('none')) {
       return symbol;
   }
 
+  // Fallback construction
   return `${root}${quality}${extension}${bass && bass !== root ? `/${bass}` : ''}`;
 };
 
@@ -47,6 +55,7 @@ const ChordPlayer: React.FC<{
 }> = ({ audioUrl, duration, analysis }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
   
   // Player State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -76,15 +85,33 @@ const ChordPlayer: React.FC<{
     return () => cancelAnimationFrame(animationFrameId);
   }, [isPlaying]);
 
-  // --- AUTO SCROLL GRID ---
+  // --- AUTO SCROLL GRID (INTERNAL SCROLL ONLY) ---
   useEffect(() => {
     if (isPlaying && gridContainerRef.current) {
-        const activeCard = gridContainerRef.current.querySelector('.active-card');
-        if (activeCard) {
-            activeCard.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      // Find the index of the active chord
+      const activeIndex = analysis.chords?.findIndex(
+        c => currentTime >= c.seconds && currentTime < (c.seconds + c.duration)
+      );
+
+      if (activeIndex !== -1 && activeIndex !== undefined) {
+        const activeCard = cardRefs.current[activeIndex];
+        const container = gridContainerRef.current;
+
+        if (activeCard && container) {
+           // Calculate position relative to container, not the window
+           const cardTop = activeCard.offsetTop;
+           const cardHeight = activeCard.clientHeight;
+           const containerHeight = container.clientHeight;
+           
+           // Smooth scroll the CONTAINER only
+           container.scrollTo({
+             top: cardTop - (containerHeight / 2) + (cardHeight / 2),
+             behavior: 'smooth'
+           });
         }
+      }
     }
-  }, [currentTime, isPlaying]);
+  }, [currentTime, isPlaying, analysis.chords]);
 
   // --- CONTROLS ---
   const togglePlay = () => {
@@ -108,8 +135,8 @@ const ChordPlayer: React.FC<{
   return (
     <div className="w-full max-w-7xl mx-auto space-y-8">
       
-      {/* 1. TIMELINE & PLAYER (The "Moises" View) */}
-      <div className="bg-slate-900 rounded-3xl border border-slate-700 overflow-hidden shadow-2xl relative">
+      {/* 1. TIMELINE & PLAYER (Sticky functionality if needed, but relative here) */}
+      <div className="bg-slate-900 rounded-3xl border border-slate-700 overflow-hidden shadow-2xl relative z-20">
         <audio 
             ref={audioRef} 
             src={audioUrl} 
@@ -118,25 +145,24 @@ const ChordPlayer: React.FC<{
         />
 
         {/* Timeline Visualizer */}
-        <div className="relative bg-slate-950 h-64 overflow-hidden border-b border-slate-800 select-none cursor-pointer"
+        <div className="relative bg-slate-950 h-48 sm:h-64 overflow-hidden border-b border-slate-800 select-none cursor-pointer group"
              onClick={(e) => {
-                 const rect = e.currentTarget.getBoundingClientRect();
-                 const x = e.clientX - rect.left;
-                 // Center is currentTime. This is complex to click-seek precisely on a moving canvas, 
-                 // so we mostly rely on the slider, but visual feedback is nice.
+                 // Optional: Click to seek logic could go here
              }}
         >
+             {/* Center Line */}
              <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-indigo-500 z-30 shadow-[0_0_15px_indigo]"></div>
              
+             {/* Moving Track */}
              <div 
                className="absolute top-0 bottom-0 left-1/2 will-change-transform"
                style={{ transform: `translate3d(${-currentTime * FIXED_PPS}px, 0, 0)` }}
              >
-                {/* Sections */}
+                {/* Sections (Top Strip) */}
                 <div className="absolute top-0 h-6 flex">
                     {analysis.sections?.map((section, i) => (
                         <div key={i} 
-                            className="h-full px-2 text-[9px] font-bold uppercase flex items-center text-white/80 border-r border-white/10 truncate"
+                            className="h-full px-2 text-[9px] font-bold uppercase flex items-center text-white/80 border-r border-white/10 truncate whitespace-nowrap"
                             style={{ 
                                 left: `${section.startTime * FIXED_PPS}px`, 
                                 width: `${(section.endTime - section.startTime) * FIXED_PPS}px`,
@@ -153,13 +179,13 @@ const ChordPlayer: React.FC<{
                 <div className="absolute top-8 bottom-0 flex">
                     {analysis.chords?.map((chord, i) => (
                         <div key={i}
-                             className={`absolute top-0 bottom-0 border-r border-white/5 flex items-center justify-center transition-opacity ${activeChord === chord ? 'opacity-100' : 'opacity-40'}`}
+                             className={`absolute top-0 bottom-0 border-r border-white/5 flex items-center justify-center transition-opacity ${activeChord === chord ? 'opacity-100 bg-white/5' : 'opacity-40'}`}
                              style={{
                                  left: `${chord.seconds * FIXED_PPS}px`,
                                  width: `${Math.max(chord.duration * FIXED_PPS, 2)}px`
                              }}
                         >
-                            <span className="text-lg font-bold text-white/30 truncate px-1">
+                            <span className="text-lg sm:text-2xl font-bold text-white/30 truncate px-1">
                                 {getDisplayChord(chord, 'Basic')}
                             </span>
                         </div>
@@ -168,60 +194,64 @@ const ChordPlayer: React.FC<{
              </div>
              
              {/* Gradients */}
-             <div className="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-slate-900 to-transparent z-20 pointer-events-none"></div>
-             <div className="absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-slate-900 to-transparent z-20 pointer-events-none"></div>
+             <div className="absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-slate-900 via-slate-900/80 to-transparent z-20 pointer-events-none"></div>
+             <div className="absolute inset-y-0 right-0 w-1/4 bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent z-20 pointer-events-none"></div>
         </div>
 
         {/* Controls */}
         <div className="p-4 bg-slate-900 flex flex-col gap-4">
              {/* Seeker */}
              <div className="flex items-center gap-4">
-                <span className="text-xs font-mono text-slate-400">{Math.floor(currentTime/60)}:{Math.floor(currentTime%60).toString().padStart(2,'0')}</span>
+                <span className="text-xs font-mono text-slate-400 w-10 text-right">{Math.floor(currentTime/60)}:{Math.floor(currentTime%60).toString().padStart(2,'0')}</span>
                 <input 
                   type="range" min={0} max={duration} step={0.05} 
                   value={currentTime} onChange={handleSeek}
-                  className="flex-1 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  className="flex-1 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400"
                 />
-                <span className="text-xs font-mono text-slate-400">{Math.floor(duration/60)}:{Math.floor(duration%60).toString().padStart(2,'0')}</span>
+                <span className="text-xs font-mono text-slate-400 w-10">{Math.floor(duration/60)}:{Math.floor(duration%60).toString().padStart(2,'0')}</span>
              </div>
 
              <div className="flex justify-between items-center">
                  <div className="flex items-center gap-4">
-                     <button onClick={togglePlay} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 transition shadow-lg shadow-white/10">
+                     <button onClick={togglePlay} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 transition shadow-lg shadow-white/10 active:scale-95">
                         {isPlaying ? <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> : <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>}
                      </button>
                      <div>
-                        <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Now Playing</div>
-                        <div className="text-white font-bold text-lg">{activeChord ? getDisplayChord(activeChord, 'Advanced') : '--'}</div>
+                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Now Playing</div>
+                        <div className="text-white font-bold text-xl sm:text-2xl leading-none mt-1">
+                            {activeChord ? getDisplayChord(activeChord, complexity) : '--'}
+                        </div>
                      </div>
                  </div>
                  
-                 <div className="flex items-center gap-2">
-                     <span className="text-xs font-bold text-slate-500 uppercase">Speed</span>
-                     <div className="flex bg-slate-800 rounded-lg p-1">
-                         {[0.5, 0.75, 1.0].map(r => (
-                             <button key={r} onClick={() => { setPlaybackRate(r); if(audioRef.current) audioRef.current.playbackRate = r; }}
-                                className={`px-2 py-1 text-xs rounded font-bold ${playbackRate === r ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>
-                                {r}x
-                             </button>
-                         ))}
+                 <div className="flex items-center gap-3">
+                     <div className="flex flex-col items-end">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Speed</span>
+                        <div className="flex bg-slate-800 rounded-lg p-0.5 mt-0.5">
+                            {[0.5, 0.75, 1.0].map(r => (
+                                <button key={r} onClick={() => { setPlaybackRate(r); if(audioRef.current) audioRef.current.playbackRate = r; }}
+                                    className={`px-2 py-1 text-[10px] rounded font-bold transition-colors ${playbackRate === r ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+                                    {r}x
+                                </button>
+                            ))}
+                        </div>
                      </div>
                  </div>
              </div>
         </div>
       </div>
 
-      {/* 2. CHORD GRID (The "Screenshots" View) */}
-      <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800/50">
+      {/* 2. CHORD GRID (Scrollable independently) */}
+      <div className="bg-slate-950/50 p-6 rounded-3xl border border-slate-800/50 relative z-10">
           <div className="flex justify-between items-end mb-6">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
                 Harmonic Grid
               </h2>
               <div className="flex bg-slate-900 rounded-lg p-1">
-                 {(['Intermediate', 'Advanced'] as AnalysisLevel[]).map(lvl => (
+                 {(['Basic', 'Intermediate', 'Advanced'] as AnalysisLevel[]).map(lvl => (
                     <button key={lvl} onClick={() => setComplexity(lvl)}
-                        className={`px-3 py-1 text-[10px] rounded uppercase font-bold tracking-wider ${complexity === lvl ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-500 hover:text-slate-300'}`}>
+                        className={`px-3 py-1 text-[10px] rounded uppercase font-bold tracking-wider transition-all ${complexity === lvl ? 'bg-indigo-500/20 text-indigo-300 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}>
                         {lvl}
                     </button>
                  ))}
@@ -230,18 +260,17 @@ const ChordPlayer: React.FC<{
 
           <div 
              ref={gridContainerRef}
-             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-indigo-900 scrollbar-track-slate-900"
+             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-indigo-900 scrollbar-track-slate-900 scroll-smooth"
           >
              {analysis.chords?.map((chord, i) => {
                  const isActive = activeChord === chord;
                  const chordLabel = getDisplayChord(chord, complexity);
                  const root = cleanStr(chord.root);
                  
-                 // Colors based on root (Simple music theory coloring)
-                 // Just a subtle hint, not overwhelming
                  return (
                      <button 
                         key={i}
+                        ref={(el) => { cardRefs.current[i] = el; }}
                         onClick={() => {
                             if(audioRef.current) {
                                 audioRef.current.currentTime = chord.seconds;
@@ -249,9 +278,9 @@ const ChordPlayer: React.FC<{
                             }
                         }}
                         className={`
-                           relative group text-left p-3 rounded-xl border transition-all duration-200
+                           relative group text-left p-3 rounded-xl border transition-all duration-300
                            ${isActive 
-                             ? 'bg-indigo-900/40 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.2)] active-card scale-105 z-10' 
+                             ? 'bg-indigo-900/40 border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.25)] ring-1 ring-indigo-400/30 scale-[1.02] z-10' 
                              : 'bg-slate-900 border-slate-800 hover:border-slate-600 hover:bg-slate-800'
                            }
                         `}
@@ -260,29 +289,25 @@ const ChordPlayer: React.FC<{
                             <span className={`text-[10px] font-mono ${isActive ? 'text-indigo-300' : 'text-slate-500'}`}>
                                 {chord.timestamp}
                             </span>
-                            <span className="text-[9px] text-slate-600">
-                                {Math.floor((chord.confidence || 0) * 100)}%
-                            </span>
                         </div>
 
-                        <div className={`text-2xl font-black mb-1 tracking-tight ${isActive ? 'text-white' : 'text-indigo-400'}`}>
+                        <div className={`text-2xl font-black mb-1 tracking-tight truncate ${isActive ? 'text-white' : 'text-indigo-400'}`}>
                             {chordLabel}
                         </div>
 
-                        <div className="flex flex-col gap-0.5">
-                            {cleanStr(chord.bass) && cleanStr(chord.bass) !== root && (
-                                <span className="text-[10px] font-bold text-slate-400">
-                                    Bass: <span className="text-slate-200">{cleanStr(chord.bass)}</span>
-                                </span>
-                            )}
-                            <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wider">
-                                {cleanStr(chord.quality) || 'Major'}
-                            </span>
-                        </div>
+                        {complexity !== 'Basic' && (
+                             <div className="flex flex-col gap-0.5">
+                                 {cleanStr(chord.bass) && cleanStr(chord.bass) !== root && (
+                                     <span className="text-[10px] font-bold text-slate-400">
+                                         Bass: <span className="text-slate-200">{cleanStr(chord.bass)}</span>
+                                     </span>
+                                 )}
+                             </div>
+                        )}
                         
                         {/* Progress Bar inside card */}
                         {isActive && (
-                             <div className="absolute bottom-0 left-0 h-1 bg-indigo-500 transition-all duration-75"
+                             <div className="absolute bottom-0 left-0 h-1 bg-indigo-500 transition-all duration-75 rounded-b-xl"
                                   style={{ width: `${Math.min(100, ((currentTime - chord.seconds) / chord.duration) * 100)}%` }}
                              />
                         )}
@@ -303,7 +328,7 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, metada
     <div className="w-full animate-fade-in pb-20">
       
       {/* Top Metadata Cards */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-center">
              <div className="text-[10px] font-bold uppercase text-slate-500 tracking-widest mb-1">Key Center</div>
              <div className="text-2xl font-black text-white">{analysis.key}</div>

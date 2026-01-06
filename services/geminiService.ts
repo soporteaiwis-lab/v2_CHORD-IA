@@ -6,35 +6,28 @@ import { SongAnalysis } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // --- CONFIGURATION ---
-// Gemini 2.0 Flash is the fastest and most intelligent model for this task currently available.
+// Gemini 2.0 Flash Exp is currently the best balance of speed/reasoning
 const MODEL_ID = "gemini-2.0-flash-exp"; 
 
 // --- ROBUST JSON REPAIR ENGINE ---
 const repairMalformedJSON = (jsonString: string): string => {
   let fixed = jsonString.trim();
 
-  // 1. Remove Markdown code blocks
+  // 1. Remove Markdown code blocks and any "Thinking" text pre-amble
   fixed = fixed.replace(/```json/g, '').replace(/```/g, '');
-
-  // 2. Locate the main JSON object
+  
+  // Isolate the JSON object if there's conversational text around it
   const firstBrace = fixed.indexOf('{');
   const lastBrace = fixed.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1) {
     fixed = fixed.substring(firstBrace, lastBrace + 1);
   }
 
-  // 3. Fix: Add double quotes to keys that don't have them
-  // Matches "key:" or " key:" and replaces with ""key":"
-  // This Regex looks for alphanumeric keys followed by a colon that are NOT already in quotes
+  // 2. Fix missing quotes on keys
   fixed = fixed.replace(/([{,]\s*)([a-zA-Z0-9_]+?)\s*:/g, '$1"$2":');
 
-  // 4. Fix: Remove trailing commas before closing braces/brackets
+  // 3. Fix trailing commas
   fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
-
-  // 5. Fix: Convert single quotes to double quotes for values
-  // Warning: This is a heuristic and might affect content with apostrophes, 
-  // but strict music data usually doesn't have complex text.
-  // fixed = fixed.replace(/'/g, '"'); // Optional, use with caution
 
   return fixed;
 };
@@ -43,7 +36,7 @@ const extractJSON = (text: string): any => {
   if (!text) return null;
   
   try {
-    // First attempt: Direct parse (fastest)
+    // Attempt direct parse first
     let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const firstBrace = cleanText.indexOf('{');
     const lastBrace = cleanText.lastIndexOf('}');
@@ -54,7 +47,6 @@ const extractJSON = (text: string): any => {
   } catch (e) {
     console.warn("Direct JSON parse failed. Attempting repair engine...");
     try {
-        // Second attempt: Repair Engine
         const repaired = repairMalformedJSON(text);
         return JSON.parse(repaired);
     } catch (e2) {
@@ -89,19 +81,27 @@ async function generateWithRetry(contents: any, config: any, retries = 0): Promi
 // --- MAIN ANALYSIS ---
 
 export const analyzeAudioContent = async (base64Data: string, mimeType: string, duration: number): Promise<SongAnalysis> => {
+  // Format duration for context
   const formattedDuration = `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}`;
   
+  // DEEP ANALYSIS PROMPT
+  // We force the AI to "think" about the grid structure before assigning chords.
   const prompt = `
-    Role: Virtuoso Music Theorist.
-    Task: Analyze this audio (${formattedDuration}) and return a detailed harmonic JSON.
+    Role: World-Class Music Theorist & Audio Engineer.
+    Task: Deep Harmonic Analysis of this audio file (${formattedDuration} total length).
 
-    INSTRUCTIONS:
-    1. **Format**: Return ONLY valid JSON. Ensure all property names are in double quotes.
-    2. **Precision**: 'seconds' must be exact floats (e.g., 12.45). Sync must be perfect.
-    3. **Content**:
-       - 'symbol': The full chord name (e.g., Cm7/Bb).
-       - 'confidence': 0.0 to 1.0 (estimate certainty).
-       - 'sections': Break down Intro, Verse, Chorus, etc.
+    CRITICAL PROCESS (Follow these steps internally):
+    1. **Listen for the Beat**: Determine the exact BPM and Time Signature first.
+    2. **Construct the Grid**: Calculate how many measures exist based on duration & BPM.
+    3. **Analyze Key**: Listen to the Bass and Melody interaction. Check specific frequencies. Verify the Key Center multiple times.
+    4. **Assign Chords**: Map harmony to the time grid.
+       - IMPORTANT: The 'chords' array MUST cover the audio from 0.00s to exactly ${duration}s. Do not stop early.
+       - Use "N.C." for silence/noise.
+
+    OUTPUT FORMAT RULES:
+    1. Return **ONLY valid JSON**.
+    2. 'seconds' must be precise floats (e.g. 12.435).
+    3. 'symbol' should be the full chord (e.g., Cm7/Bb).
 
     JSON STRUCTURE:
     {
@@ -110,22 +110,22 @@ export const analyzeAudioContent = async (base64Data: string, mimeType: string, 
       "key": "C Minor",
       "bpm": 120,
       "timeSignature": "4/4",
-      "complexityLevel": "Intermediate",
-      "summary": "Brief harmonic description.",
+      "complexityLevel": "Intermediate", 
+      "summary": "Detailed harmonic description of progression, modulation, and cadence.",
       "sections": [
-        { "name": "Intro", "startTime": 0.0, "endTime": 8.0, "color": "#475569" }
+        { "name": "Intro", "startTime": 0.0, "endTime": 15.5, "color": "#475569" }
       ],
       "chords": [
         {
           "timestamp": "0:00",
           "seconds": 0.0,
-          "duration": 2.0,
+          "duration": 2.5,
           "root": "C",
           "quality": "min",
           "extension": "7",
           "bass": "Bb",
           "symbol": "Cm7/Bb",
-          "confidence": 0.98
+          "confidence": 0.99
         }
       ]
     }
@@ -141,7 +141,7 @@ export const analyzeAudioContent = async (base64Data: string, mimeType: string, 
 
     const response = await generateWithRetry(contents, {
       responseMimeType: "application/json", 
-      temperature: 0.2, // Low temperature for consistent formatting
+      temperature: 0.1, // Very low temperature for maximum precision and adherence to structure
       maxOutputTokens: 8192,
     });
 
@@ -157,8 +157,14 @@ export const analyzeAudioContent = async (base64Data: string, mimeType: string, 
 
 export const analyzeSongFromUrl = async (url: string): Promise<SongAnalysis> => {
   const prompt = `
-    Role: Music Theorist. Analyze URL: "${url}".
-    Return ONLY valid JSON with this structure:
+    Role: Expert Music Theorist. Analyze the harmony of this URL: "${url}".
+    
+    REQUIREMENTS:
+    1. Detect BPM and Key with high precision.
+    2. Create a full chord chart from start to finish.
+    3. Output valid JSON only.
+
+    STRUCTURE:
     {
       "title": "string", "artist": "string", "key": "string", "bpm": number, "timeSignature": "string",
       "sections": [{ "name": "string", "startTime": number, "endTime": number }],

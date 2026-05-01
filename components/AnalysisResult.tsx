@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { SongAnalysis, ChordEvent, AudioMetadata, AnalysisLevel } from '../types';
 
@@ -26,16 +27,13 @@ const getDisplayChord = (chord: ChordEvent, level: AnalysisLevel): string => {
   if (quality === 'major' || quality === 'maj') quality = ''; 
   if (quality === 'dominant' || quality === 'dom') quality = ''; 
   
-  // --- BASIC MODE: STRICT TRIADS ONLY ---
+  // --- BASIC MODE ---
   if (level === 'Basic') {
-     // If it's diminished or augmented, keep that info as it's critical for function
      if (quality === 'dim' || quality === 'aug') return `${root}${quality}`;
-     // Otherwise, strictly Root + m (if minor)
-     // No 7ths, no slash bass
      return `${root}${quality === 'm' ? 'm' : ''}`; 
   }
   
-  // --- ADVANCED/INTERMEDIATE ---
+  // --- ADVANCED ---
   if (symbol && symbol.length < 15 && !symbol.toLowerCase().includes('none')) {
       return symbol;
   }
@@ -89,8 +87,6 @@ const ChordPlayer: React.FC<{
         const container = gridContainerRef.current;
 
         if (activeCard && container) {
-           // Scroll ONLY the grid container, vertically centered
-           // We calculate the position needed to center the card within the visible container area
            const cardTop = activeCard.offsetTop;
            const cardHeight = activeCard.clientHeight;
            const containerHeight = container.clientHeight;

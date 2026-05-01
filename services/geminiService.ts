@@ -17,7 +17,7 @@ const extractJSON = (text: string): any => {
   let cleanText = text.trim();
   cleanText = cleanText.replace(/```json/g, '').replace(/```/g, '');
 
-  // 2. Isolate JSON Object (Find outer braces)
+  // 2. Isolate JSON Object
   const firstBrace = cleanText.indexOf('{');
   const lastBrace = cleanText.lastIndexOf('}');
 
@@ -25,28 +25,32 @@ const extractJSON = (text: string): any => {
     cleanText = cleanText.substring(firstBrace, lastBrace + 1);
   }
 
-  // 3. ATTEMPT 1: Direct Parse (Most Reliable)
+  // 3. Robust Parsing Strategy
   try {
+    // Attempt 1: Direct Parse
     return JSON.parse(cleanText);
   } catch (e) {
     console.warn("Direct parse failed. Attempting repair...");
-  }
+    
+    try {
+        // Attempt 2: Common Fixes
+        let repaired = cleanText;
+        
+        // Fix: Quote unquoted keys (simple regex, safe for simple keys)
+        repaired = repaired.replace(/([{,]\s*)([a-zA-Z0-9_]+?)\s*:/g, '$1"$2":');
+        
+        // Fix: Remove trailing commas
+        repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
 
-  // 4. ATTEMPT 2: Aggressive Repair (Fallback only)
-  try {
-    // Fix unquoted keys (e.g. { key: "value" } -> { "key": "value" })
-    // We use a specific regex that tries to avoid matching text inside values
-    // This looks for a key at the start of a line or after a comma/brace
-    let repaired = cleanText.replace(/([{,]\s*)([a-zA-Z0-9_]+?)\s*:/g, '$1"$2":');
-    
-    // Fix trailing commas before closing braces
-    repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
-    
-    return JSON.parse(repaired);
-  } catch (e) {
-    console.error("JSON Repair Failed:", e);
-    console.log("Failed Text:", text);
-    throw new Error("Analysis produced invalid data format.");
+        // Fix: Replace NaN with null (JSON doesn't support NaN)
+        repaired = repaired.replace(/:\s*NaN/g, ': null');
+
+        return JSON.parse(repaired);
+    } catch (e2) {
+        console.error("JSON Repair Failed:", e2);
+        console.log("Failed Text:", text);
+        throw new Error("Analysis produced invalid data format.");
+    }
   }
 };
 
@@ -77,29 +81,24 @@ async function generateWithRetry(contents: any, config: any, retries = 0): Promi
 export const analyzeAudioContent = async (base64Data: string, mimeType: string, duration: number): Promise<SongAnalysis> => {
   const formattedDuration = `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}`;
   
-  // Precise prompt asking for JSON only
+  // Classic, stable prompt structure
   const prompt = `
-    Role: Senior Music Theorist.
-    Task: Analyze audio (${formattedDuration}) and return strictly formatted JSON.
-    
-    INSTRUCTIONS:
-    1. **BPM & Grid**: Determine precise BPM. Ensure chord timestamps align perfectly with the grid.
-    2. **Completeness**: The chords array MUST cover the audio from 0.0s to exactly ${duration}s. Use "N.C." for silence.
-    3. **Accuracy**: Detect key changes (modulations) and complex extensions.
-    
-    OUTPUT FORMAT:
-    - Return **ONLY** the JSON object. Do not include "Thinking" steps or markdown text outside the JSON.
-    - Ensure all keys and string values are double-quoted.
+    Analyze the following audio file (${formattedDuration}) and provide a harmonic analysis in valid JSON.
 
-    JSON STRUCTURE:
+    REQUIREMENTS:
+    1. BPM & Sync: Detect the BPM. Generate a chord progression that is synchronized with the audio time (seconds).
+    2. Coverage: The chords array must cover the full duration from 0.0s to ${duration}s. Use "N.C." for silence.
+    3. Output: Return ONLY the JSON object. No other text.
+
+    JSON SCHEMA:
     {
-      "title": "Song Title",
+      "title": "Track Title",
       "artist": "Artist Name",
-      "key": "C Minor",
+      "key": "Key (e.g. Cm)",
       "bpm": 120,
       "timeSignature": "4/4",
       "complexityLevel": "Intermediate",
-      "summary": "Brief harmonic description.",
+      "summary": "Short description of the harmony.",
       "sections": [
         { "name": "Intro", "startTime": 0.0, "endTime": 10.0, "color": "#475569" }
       ],
@@ -107,13 +106,13 @@ export const analyzeAudioContent = async (base64Data: string, mimeType: string, 
         {
           "timestamp": "0:00",
           "seconds": 0.0,
-          "duration": 2.5,
+          "duration": 2.0,
           "root": "C",
           "quality": "min",
           "extension": "7",
-          "bass": "Bb",
-          "symbol": "Cm7/Bb",
-          "confidence": 0.99
+          "bass": "G",
+          "symbol": "Cm7/G",
+          "confidence": 1.0
         }
       ]
     }
@@ -129,7 +128,7 @@ export const analyzeAudioContent = async (base64Data: string, mimeType: string, 
 
     const response = await generateWithRetry(contents, {
       responseMimeType: "application/json", 
-      temperature: 0.1, // Low temperature for consistent JSON structure
+      temperature: 0.3, // Balanced for creativity vs structure
       maxOutputTokens: 8192,
     });
 
@@ -144,9 +143,8 @@ export const analyzeAudioContent = async (base64Data: string, mimeType: string, 
 
 export const analyzeSongFromUrl = async (url: string): Promise<SongAnalysis> => {
   const prompt = `
-    Role: Music Theorist. Analyze URL: "${url}".
-    Return ONLY valid JSON.
-    Structure:
+    Analyze this URL: "${url}". Return valid JSON only.
+    Schema:
     {
       "title": "string", "artist": "string", "key": "string", "bpm": number, "timeSignature": "string",
       "sections": [{ "name": "string", "startTime": number, "endTime": number }],
